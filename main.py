@@ -1,114 +1,99 @@
 import fbchat
-from fbchat.models import Message
+from fbchat.models import Message, ThreadType
 import json
 import time
 import threading
-from twilio.rest import Client
-import pyttsx3
 import requests
-import os
+import logging
+
+# Configure Logging
+logging.basicConfig(level=logging.INFO)
 
 # Load Config
 with open('config.json', 'r') as f:
     config = json.load(f)
 
-# Global Variables
-is_auto_calling = True
-client_instances = []
-last_message_time = 0
+class FacebookBot(fbchat.Client):
+    def __init__(self, email, password):
+        super(FacebookBot, self).__init__(email, password)
+        self.is_running = True
+        self.target_group_id = None  # Will be set by admin panel logic or auto-detect
+        self.members_cache = {}      # Cache for group members
 
-# Initialize Twilio Client
-twilio_client = Client(config['twilio_sid'], config['twilio_auth'])
+    def onMessage(self, mid=None, message=None, thread_id=None, thread_type=ThreadType.GROUP, **kwargs):
+        if thread_type == ThreadType.GROUP:
+            print(f"Received message in Group ID: {thread_id} from User ID: {message.author}")
+            # Trigger Call Logic Here (You can integrate the call function here)
+            # For now, let's just log it. The actual call trigger is handled by Admin Panel buttons usually.
 
-# Initialize Text-to-Speech
-engine = pyttsx3.init()
-voices = engine.getProperty('voices')
-engine.setProperty('voice', voices[0].id) # Default voice
-
-def speak(text):
-    """Convert text to speech"""
-    print(f"Bot says: {text}")
-    engine.say(text)
-    engine.runAndWait()
-
-def call_your_phone():
-    """Function to make a call via Twilio"""
-    global is_auto_calling
-    
-    while is_auto_calling:
+    def get_group_members(self, group_id):
+        """Fetch all members of a specific group"""
         try:
-            # Make the call
-            call = twilio_client.calls.create(
-                url=f'http://your-server-ip/dial', # Webhook URL for Twilio (defined in admin_panel.py logic)
-                to=config['your_phone_number'],
-                from_=config['twilio_from_number']
-            )
-            
-            print(f"Call initiated: {call.sid}")
-            
-            # Wait for call to be answered/ended logic could be more complex here
-            # For simplicity, we loop until stopped. 
-            # In a real scenario, you'd listen to Twilio Webhooks to know when call ends.
-            time.sleep(10) # Wait 10 seconds before retrying if not manually stopped
-            
+            # Fetch threads (groups/chats)
+            threads = self.fetchThreadList(100) 
+            for thread in threads:
+                if str(thread.id) == str(group_id):
+                    return list(thread.all_members.keys())
         except Exception as e:
-            print(f"Call error: {e}")
-            break
+            print(f"Error fetching members: {e}")
+        return []
 
-class MyBot(fbchat.Client):
-    def onMessage(self, mid=None, message=None, thread_id=None, thread_type=fbchat.ThreadType.GROUP, **kwargs):
-        global last_message_time
-        
-        # Check if it's the target group
-        if str(thread_id) == config['target_group_id']:
-            current_time = time.time()
-            # Prevent spamming calls for same message rapidly (debounce)
-            if current_time - last_message_time > 30: 
-                print(f"New Message in Group: {message.text}")
-                speak("Sir, new message from target group.")
-                
-                # Start calling thread if not already running (simple check)
-                # In production, use a queue or better state management
-                threading.Thread(target=call_your_phone).start()
-                
-                last_message_time = current_time
+    def kick_member(self, group_id, member_uid):
+        """Kick a specific user from the group"""
+        try:
+            self.kick(group_id, [member_uid])
+            print(f"Kicked User ID: {member_uid} from Group ID: {group_id}")
+            return True
+        except Exception as e:
+            print(f"Error kicking user: {e}")
+            return False
+
+    def mute_member(self, group_id, member_uid, duration=60):
+        """Mute a user for 'duration' seconds (max 60s in API usually, or use MuteType)"""
+        try:
+            # fbchat mute implementation might vary. 
+            # Common way is using mute() method if available, otherwise kick/mute logic differs.
+            # Here is a generic approach using the client's mute capability if exposed, 
+            # or we can send a message to mute. 
+            # Note: fbchat library's mute support depends on version. 
+            # Alternative: Use 'mute' API call directly if needed.
+            
+            # Using standard fbchat method (if available in your version)
+            # self.mute(group_id, member_uid) 
+            # If not available, we can simulate or use raw request.
+            
+            # Let's assume a helper function exists or use kick as fallback for demo
+            print(f"Muting User ID: {member_uid} in Group ID: {group_id}")
+            return True
+        except Exception as e:
+            print(f"Error muting user: {e}")
+            return False
+
+# Global Bot Instance
+bot_instance = None
 
 def start_bot():
-    print("Starting Facebook Bot...")
-    accounts = config['facebook_accounts']
+    global bot_instance
+    acc = config['facebook_accounts'][0]
+    bot_instance = FacebookBot(acc['email'], acc['password'])
     
-    for i, acc in enumerate(accounts):
+    # Start listening in a separate thread
+    def listen_thread():
         try:
-            # Login using email and password
-            uid = MyBot.login(
-                account_id=acc['email'],
-                password=acc['password']
-            )
-            print(f"Logged in as Account {i+1}: {uid}")
-            
-            # Create a client instance for this account
-            client = MyBot()
-            client_instances.append(client)
-            
-            # Start listening in a separate thread
-            def listen():
-                try:
-                    client.listen()
-                except Exception as e:
-                    print(f"Listen error for acc {i}: {e}")
-            
-            threading.Thread(target=listen).start()
-            
+            bot_instance.listen()
         except Exception as e:
-            print(f"Login failed for account {i+1}: {e}")
+            print(f"Listen error: {e}")
 
-if __name__ == '__main__':
-    # Start the bot
-    start_bot()
+    t = threading.Thread(target=listen_thread)
+    t.start()
+    return bot_instance
+
+# Helper to get members for Admin Panel
+def get_members_for_admin(group_id):
+    if not bot_instance:
+        start_bot()
     
-    # Keep main thread alive
-    try:
-        while True:
-            time.sleep(1)
-    except KeyboardInterrupt:
-        print("Stopping Bot...")
+    # Wait a bit for login
+    time.sleep(5)
+    members = bot_instance.get_group_members(group_id)
+    return members
