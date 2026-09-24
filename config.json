@@ -1,17 +1,22 @@
 {
-    "facebook_accounts": [
-        {
-            "email": "your_email@gmail.com",
-            "password": "your_password"
-        }
-    ],
-    
-    "twilio_sid": "ACxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
-    "twilio_auth": "your_auth_token_here",
-    "twilio_from_number": "+1234567890", 
-    "your_phone_number": "+8801XXXXXXXXX",
-
-    "admin_port": 5000,
-    
-    "note": "Group ID and Members are fetched automatically by the bot. No need to list members here."
+  "admin_uid": "100000000000000", 
+  "admin_password": "247898@",
+  "accounts": [
+    {
+      "email": "your_facebook_email@gmail.com",
+      "password": "your_password"
+    }
+  ],
+  "target_group_ids": [
+    "1234567890123456"
+  ],
+  "settings": {
+    "auto_pick_call": true,
+    "auto_reply_enabled": true,
+    "reply_keywords": ["হ্যালো", "কেমন আছো"]
+  },
+  "bot_status": {
+    "is_logged_in": false,
+    "last_updated": "Never"
+  }
 }
